@@ -1,0 +1,26 @@
+{
+  "skill_name": "casube-ios-testing",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "run-unit-tests",
+      "prompt": "Dự án iOS nằm ở {PROJECT}/casube.ios (CameraAI.xcodeproj). Chạy toàn bộ unit test của app và báo cáo: tổng số test, bao nhiêu pass/fail, tên test fail nếu có. Lưu bản tóm tắt kết quả (kèm dòng TEST SUCCEEDED hoặc TEST FAILED từ log) vào {OUTPUTS}/test-report.md.",
+      "expected_output": "test-report.md stating 13 tests, all passed, TEST SUCCEEDED",
+      "files": []
+    },
+    {
+      "id": 1,
+      "eval_name": "write-crop-test",
+      "prompt": "Trong project iOS ở {PROJECT}/casube.ios, viết thêm unit test cho AspectRatio.cropRect: với ảnh vuông 2000x2000, crop 16:9 và 4:3 phải cho rect đúng tỉ lệ và căn giữa ảnh. Chạy test suite để xác nhận tất cả pass. Lưu bản copy file test đã thêm/sửa và log chạy test vào {OUTPUTS}/.",
+      "expected_output": "New XCTest for square-image crops added, full suite passes",
+      "files": []
+    },
+    {
+      "id": 2,
+      "eval_name": "onboarding-smoke",
+      "prompt": "App iOS CameraAI ở {PROJECT}/casube.ios. Verify màn hình onboarding hiển thị đúng trên iOS simulator: build, cài, chạy app, chụp screenshot màn onboarding, nhận xét ngắn xem có đúng thiết kế không (nền vàng, silhouette người, tagline 'Chụp đúng dáng, đẹp mọi khung hình', nút 'Bắt đầu'). Lưu screenshot + nhận xét vào {OUTPUTS}/.",
+      "expected_output": "PNG screenshot of onboarding + short written verification",
+      "files": []
+    }
+  ]
+}

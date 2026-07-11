@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "expo-ios",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "run:ios"],
+      "port": 8081
+    },
+    {
+      "name": "expo-android",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "run:android"],
+      "port": 8081
+    }
+  ]
+}
