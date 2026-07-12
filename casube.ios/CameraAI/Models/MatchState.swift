@@ -38,7 +38,7 @@ enum MatchState: String, CaseIterable, Identifiable {
                    arrows: .side, dashedBorder: false)
         case .perfect:
             Config(color: Tokens.matchPerfect, light: Tokens.matchPerfectLight, percent: 97,
-                   label: "97% khớp", hint: "Đã khớp! Đang tự động chụp...",
+                   label: "97% khớp", hint: "Đã khớp! Sắp chụp...",
                    arrows: .none, dashedBorder: false)
         }
     }
