@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  open-webui:
+    ports:
+      - 3000:8080
+    volumes:
+      - open-webui:/app/backend/data
+    container_name: open-webui
+    restart: always
+    image: ghcr.io/open-webui/open-webui:main
+    networks:
+      - webui-bridge
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  webui-bridge:
+    driver: bridge
+    name: webui-bridge
+
+volumes:
+  open-webui:
+    name: open-webui
