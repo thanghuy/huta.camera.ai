@@ -44,6 +44,10 @@ final class CameraStore {
         return ReferencePose.all.filter { $0.category == libraryCategory }
     }
 
+    /// Auto-capture state tracker (WIN-9)
+    /// Tracks perfect pose dwell time & cooldown for automatic photo capture
+    private(set) var autoCaptureTracker = PerfectStateTracker(dwellTimeMs: 500, cooldownMs: 2000)
+
     init() {
         if let raw = UserDefaults.standard.string(forKey: Self.aspectRatioKey),
            let saved = AspectRatio(rawValue: raw) {
@@ -56,5 +60,17 @@ final class CameraStore {
     func selectPose(_ pose: ReferencePose) {
         selectedPoseID = pose.id
         isPoseLibraryOpen = false
+        resetAutoCapture()  // Reset tracker when pose changes
+    }
+
+    /// Reset auto-capture state (called on pose/mode changes)
+    func resetAutoCapture() {
+        autoCaptureTracker.reset()
+    }
+
+    /// Update auto-capture tracker with current match state
+    /// Call this after every pose matching update
+    func updateAutoCaptureState(matchState: MatchState) {
+        autoCaptureTracker.update(matchState: matchState)
     }
 }
