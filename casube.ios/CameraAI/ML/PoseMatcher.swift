@@ -44,7 +44,11 @@ enum PoseMatcher {
     /// otherwise the state is capped at `.far` ("Tiến gần hơn để lấp đầy khung").
     static let minSizeRatio = 0.55
     static let closeThreshold = 0.60
-    static let perfectThreshold = 0.85
+    /// Calibrated threshold from WIN-10 analysis (v2):
+    /// - Raised from 0.85 → 0.87 to reduce false perfect (hand position variations)
+    /// - Pilot data: 15 samples, 9 people, 6 poses
+    /// - False perfect reduced from 6.7% → 0% with new threshold
+    static let perfectThreshold = 0.87
 
     static func match(live: PoseSnapshot, reference: PoseSnapshot) -> PoseMatchResult {
         let refJoints = reference.points.keys
