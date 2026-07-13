@@ -24,8 +24,13 @@ struct RootView: View {
         #if DEBUG
         .onAppear {
             // Dev shortcut: `--camera` launch argument jumps straight to the camera.
-            if CommandLine.arguments.contains("--camera") {
+            if CommandLine.arguments.contains("--camera") || CommandLine.arguments.contains("--gallery") {
                 path = [.camera]
+            }
+            // Dev shortcut: `--gallery` also opens the "Thư viện ảnh" sheet, for
+            // simulator screenshot verification of the PhotoKit gallery (WIN-12).
+            if CommandLine.arguments.contains("--gallery") {
+                store.isPhotoLibraryOpen = true
             }
         }
         #endif
