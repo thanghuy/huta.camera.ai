@@ -7,11 +7,18 @@ description: Use when wiring the "Thư viện ảnh" gallery sheet (CameraAI/Pos
 
 ## Overview
 
-`PhotoLibrarySheet.swift` is currently a stub: a 3-column `LazyVGrid` of hardcoded
-`Color` rectangles. WIN-12 swaps that data source for real `PHAsset` thumbnails from
-the device's Photos library, keeping the existing layout untouched. The only existing
-Photos permission in the app is `.addOnly` (`PhotoSaver.swift`, save-after-capture) —
-this is a **separate, additional** read-only grant.
+WIN-12 is **implemented** (commit `da76fb9`, branch `sprint-1/win-12`):
+`PhotoLibrarySheet.swift` was a stub — a 3-column `LazyVGrid` of hardcoded `Color`
+rectangles — and now sources real `PHAsset` thumbnails from the device's Photos
+library, with the original 3-column layout untouched. The only *other* Photos
+permission in the app is `.addOnly` (`PhotoSaver.swift`, save-after-capture) — the
+read grant this feature requests is **separate and additional** to that one, not a
+replacement.
+
+Linear can lag the repo: as of 2026-07-14 the WIN-12 issue still shows status "In
+Progress" even though every acceptance criterion below is met in code. Verify against
+`git log -- casube.ios/CameraAI/PoseLibrary/PhotoLibrarySheet.swift` and the current
+file content, not the ticket status, before treating this as unstarted work.
 
 ## Permission model
 
@@ -36,11 +43,16 @@ this is a **separate, additional** read-only grant.
 
 `CameraScreen.swift` (~line 138) already has the app's permission-denied idiom for the
 camera: icon + Vietnamese title/subtitle + yellow capsule "Mở Cài đặt" button opening
-`UIApplication.openSettingsURLString`. Copy this shape (swap `Tokens.yellow`/dark
-background for the sheet's light `Tokens.ink`/white styling) instead of inventing a new
-denied-state layout — the ticket's "đồng bộ pattern" note means visual/copy consistency,
-not literal code reuse (WIN-11 hadn't implemented its own version yet as of this
-writing).
+`UIApplication.openSettingsURLString`. The shipped `deniedState` in
+`PhotoLibrarySheet.swift` copies this shape almost verbatim, including the same
+`Tokens.yellow` capsule button — the only thing that changes is the *surrounding*
+chrome: `CameraScreen`'s denied view sits on its full-screen dark background, while the
+sheet's denied view sits inside the sheet's white background with `Tokens.ink`/
+`Tokens.muted` text. Don't reinterpret "swap the styling" as swapping the yellow button
+too; the ticket's "đồng bộ pattern" note means visual/copy consistency with
+`CameraScreen`, not a from-scratch denied-state design. (WIN-11, the ticket this note
+originally referenced for a shared pattern, is still status "Todo" with no code as of
+2026-07-14 — re-check before assuming it has since landed something to reuse instead.)
 
 ## Fetching and thumbnails
 

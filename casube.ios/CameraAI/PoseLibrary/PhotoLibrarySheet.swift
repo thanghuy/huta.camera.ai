@@ -8,6 +8,7 @@ import UIKit
 /// header/drag-handle chrome. Only the data source changed from `[Color]` to `[PHAsset]`.
 struct PhotoLibrarySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(CameraStore.self) private var store
 
     /// Mirrors `PHAuthorizationStatus` (`.readOnly` level) 1:1, including `.restricted`
     /// (parental controls/MDM) which the ticket's "4 states" language omits — it needs
@@ -27,14 +28,12 @@ struct PhotoLibrarySheet: View {
         }
     }
 
-    private struct GalleryPhoto: Identifiable {
-        let asset: PHAsset
-        var id: String { asset.localIdentifier }
-    }
-
     @State private var access: LibraryAccess = .notDetermined
     @State private var assets: [PHAsset] = []
-    @State private var viewingPhoto: GalleryPhoto?
+    /// Index into `assets` of the photo currently under full-screen review, or `nil`
+    /// when the review isn't showing. Index-based (not an `Identifiable` wrapper) so
+    /// `PhotoReviewView` can page through neighbors without re-deriving position.
+    @State private var reviewIndex: Int?
     @State private var imageManager = PHCachingImageManager()
 
     var body: some View {
@@ -72,8 +71,24 @@ struct PhotoLibrarySheet: View {
         .presentationCornerRadius(24)
         .task { await start() }
         .onDisappear { imageManager.stopCachingImagesForAllAssets() }
-        .fullScreenCover(item: $viewingPhoto) { photo in
-            PhotoFullScreenView(asset: photo.asset)
+        // Swiping down (or tapping the close affordance) inside the review always
+        // returns straight to the camera — there's no "back to grid" step, matching
+        // the stock Camera app's photo-review ↔ camera relationship. `onDismiss` fires
+        // only after the cover has finished animating away, so the sheet closes as a
+        // second, sequenced step instead of both presentations tearing down at once
+        // (which SwiftUI logs as an "already presenting" warning).
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { reviewIndex != nil },
+                set: { if !$0 { reviewIndex = nil } }
+            ),
+            onDismiss: { store.isPhotoLibraryOpen = false }
+        ) {
+            if let reviewIndex {
+                PhotoReviewView(assets: assets, initialIndex: reviewIndex) {
+                    self.reviewIndex = nil
+                }
+            }
         }
     }
 
@@ -113,7 +128,9 @@ struct PhotoLibrarySheet: View {
                         imageManager: imageManager,
                         targetSize: thumbnailTargetSize
                     ) {
-                        viewingPhoto = GalleryPhoto(asset: asset)
+                        if let index = assets.firstIndex(where: { $0.localIdentifier == asset.localIdentifier }) {
+                            reviewIndex = index
+                        }
                     }
                 }
             }
@@ -315,38 +332,194 @@ private struct AssetThumbnailCell: View {
     }
 }
 
-/// Simple full-size viewer — no QuickLook/zoom polish per ticket scope.
-private struct PhotoFullScreenView: View {
-    let asset: PHAsset
-    @Environment(\.dismiss) private var dismiss
-    @State private var image: UIImage?
+/// Camera-app-style photo review: full-screen paging through `assets` starting at
+/// `initialIndex`, pinch/double-tap zoom per page, swipe-down (or the chevron) to
+/// dismiss straight back to the camera. No edit/share/delete toolbar — out of WIN-12
+/// scope, the ticket only asks for view/swipe/zoom/dismiss.
+private struct PhotoReviewView: View {
+    let assets: [PHAsset]
+    let initialIndex: Int
+    let onDismiss: () -> Void
+
+    @State private var currentIndex: Int
+
+    init(assets: [PHAsset], initialIndex: Int, onDismiss: @escaping () -> Void) {
+        self.assets = assets
+        self.initialIndex = initialIndex
+        self.onDismiss = onDismiss
+        _currentIndex = State(initialValue: initialIndex)
+    }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
-
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                ProgressView()
-                    .tint(.white)
+        TabView(selection: $currentIndex) {
+            ForEach(assets.indices, id: \.self) { index in
+                ZoomablePhotoPage(
+                    asset: assets[index],
+                    // Only the current page and its immediate neighbors load full-res —
+                    // TabView(.page) doesn't guarantee it keeps distant pages out of
+                    // memory the way a Lazy*Stack does, and a library can be thousands
+                    // of assets long, so this window is what actually bounds memory.
+                    isNearCurrent: abs(index - currentIndex) <= 1,
+                    onSwipeDownDismiss: onDismiss
+                )
+                .tag(index)
             }
-
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .background(Color.black.ignoresSafeArea())
+        .statusBarHidden(true)
+        .overlay(alignment: .topLeading) {
+            Button(action: onDismiss) {
+                Image(systemName: "chevron.down")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 34, height: 34)
                     .background(.black.opacity(0.4), in: Circle())
             }
             .buttonStyle(.plain)
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
         }
-        .task(id: asset.localIdentifier) {
-            await loadFullImage()
+    }
+}
+
+/// One page of the review: loads its own full-res image, supports pinch-to-zoom with
+/// pan while zoomed, double-tap to toggle zoom, and a vertical swipe-to-dismiss that's
+/// only live while unzoomed (so it can't fight one-finger panning of a zoomed photo).
+private struct ZoomablePhotoPage: View {
+    let asset: PHAsset
+    let isNearCurrent: Bool
+    let onSwipeDownDismiss: () -> Void
+
+    @State private var image: UIImage?
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+    @State private var dismissDrag: CGSize = .zero
+
+    private let minScale: CGFloat = 1
+    private let maxScale: CGFloat = 4
+    private let doubleTapScale: CGFloat = 2.5
+    private let dismissThreshold: CGFloat = 120
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .scaleEffect(scale)
+                        .offset(x: offset.width, y: offset.height + dismissDrag.height)
+                        .opacity(dismissOpacity)
+                        .gesture(magnificationGesture())
+                        .simultaneousGesture(panGesture(in: geo.size))
+                        .highPriorityGesture(swipeDownGesture)
+                        .onTapGesture(count: 2) { toggleZoom() }
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
+        .task(id: "\(asset.localIdentifier)-\(isNearCurrent)") {
+            if isNearCurrent {
+                await loadFullImage()
+            } else {
+                image = nil
+            }
+        }
+        .onChange(of: asset.localIdentifier) { resetZoom() }
+    }
+
+    private var dismissOpacity: CGFloat {
+        guard dismissDrag.height > 0 else { return 1 }
+        return max(0.4, 1 - dismissDrag.height / 600)
+    }
+
+    private func toggleZoom() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            if scale > minScale {
+                scale = minScale
+                lastScale = minScale
+                offset = .zero
+                lastOffset = .zero
+            } else {
+                scale = doubleTapScale
+                lastScale = doubleTapScale
+            }
+        }
+    }
+
+    private func resetZoom() {
+        scale = minScale
+        lastScale = minScale
+        offset = .zero
+        lastOffset = .zero
+        dismissDrag = .zero
+    }
+
+    private func magnificationGesture() -> some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                scale = min(maxScale, max(minScale, lastScale * value))
+            }
+            .onEnded { _ in
+                lastScale = scale
+                if scale == minScale {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        offset = .zero
+                        lastOffset = .zero
+                    }
+                }
+            }
+    }
+
+    /// One-finger pan, only meaningful once zoomed — clamped so the image can't be
+    /// dragged past its own scaled bounds.
+    private func panGesture(in size: CGSize) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard scale > minScale else { return }
+                let maxOffsetX = size.width * (scale - 1) / 2
+                let maxOffsetY = size.height * (scale - 1) / 2
+                offset = CGSize(
+                    width: min(maxOffsetX, max(-maxOffsetX, lastOffset.width + value.translation.width)),
+                    height: min(maxOffsetY, max(-maxOffsetY, lastOffset.height + value.translation.height))
+                )
+            }
+            .onEnded { _ in
+                guard scale > minScale else { return }
+                lastOffset = offset
+            }
+    }
+
+    /// Vertical drag that follows the finger and fades the backdrop, mirroring the
+    /// stock Camera app's interactive dismiss. Bails out while zoomed so it never
+    /// competes with `panGesture` for the same one-finger drag — checked inside the
+    /// gesture itself (rather than by conditionally attaching the gesture) since
+    /// `.highPriorityGesture` needs a concrete `Gesture`, not an optional one.
+    private var swipeDownGesture: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                guard scale <= minScale else { return }
+                // Ignore mostly-horizontal drags so TabView's own paging gesture keeps
+                // first claim on left/right swipes.
+                guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                dismissDrag = CGSize(width: 0, height: max(0, value.translation.height))
+            }
+            .onEnded { value in
+                guard scale <= minScale else { return }
+                if value.translation.height > dismissThreshold {
+                    onSwipeDownDismiss()
+                } else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        dismissDrag = .zero
+                    }
+                }
+            }
     }
 
     private func loadFullImage() async {
